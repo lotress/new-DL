@@ -1,6 +1,4 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+from common import *
 
 Zero = torch.tensor(0.)
 maxLen = 5

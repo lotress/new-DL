@@ -1,4 +1,4 @@
-import torch
+from common import *
 from torch.utils.data import Dataset, DataLoader
 
 dataLength = {'train': 65536, 'val': 256, 'test': 256}

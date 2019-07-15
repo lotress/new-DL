@@ -6,7 +6,7 @@ A template to start a new deep learning project using [Python](http://python.org
 
 1. `git clone` this repository, rename the downloaded folder to your project name, then open [the main notebook](main.ipynb) to start.
 
-2. In [main.ipynb](main.ipynb) there are some cells contain sources for each module. They will write or append to corresponding .py files when executed. The last cell will run [the entry program](train.py) and it can be executed just after wrote the `imports` cell to populate imports in your notebook session. You should then implement these module for your task.
+2. In [main.ipynb](main.ipynb) there are some cells contain sources for each module. They will write or append to corresponding .py files when executed. You should then implement these module for your task. The last cell will run [the entry program](train.py).
 
 3. After coding work, run the last cell to start training or run the generated [train.py](train.py) outside Notebook.
 
@@ -19,3 +19,4 @@ A template to start a new deep learning project using [Python](http://python.org
 3. [option.py](option.py) contains hyperparameters and model-depending routines e.g loss function.
 4. [vocab.py](vocab.py) is encoder for char-based NLP models.
 5. [train.py](train.py) is the entry program for training.
+6. [common.py](common.py) imports common library and defines the s`opt` object.
