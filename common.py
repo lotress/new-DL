@@ -14,6 +14,7 @@ if torch.cuda.is_available():
   opt.device = torch.device('cuda:{}'.format(args.local_rank))
   torch.cuda.set_device(args.local_rank)
   opt.cuda = True
+  from apex import amp
 else:
   opt.device = torch.device('cpu')
   opt.dtype = torch.float
@@ -21,5 +22,6 @@ else:
   num_threads = torch.multiprocessing.cpu_count() - 1
   if num_threads > 1:
     torch.set_num_threads(num_threads)
+  amp = None
 print('Using device ' + str(opt.device))
 print('Using default dtype ' + str(opt.dtype))

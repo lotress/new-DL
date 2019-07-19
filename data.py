@@ -1,7 +1,7 @@
 from common import *
 from torch.utils.data import Dataset, DataLoader
 
-dataLength = {'train': 65536, 'val': 256, 'test': 256}
+dataLength = {'train': 4096, 'val': 256, 'test': 256}
 
 class Data(Dataset):
     def __init__(self, path):

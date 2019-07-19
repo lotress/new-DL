@@ -19,10 +19,10 @@ class Model(nn.Module):
 
     def forward(self, x, mask, *_):
         bsz, l = x.shape
-        mask = mask.to(self.dtype)
         e = self.dropout(x).view(bsz, l, 1)
+        mask = mask.to(e.dtype)
         x1 = self.act0(self.f0(e)) * mask.view(bsz, l, 1)
         x2 = self.norm(x1.view(bsz, -1)).view(bsz, l, -1) * mask.view(bsz, l, 1)
-        return self.act1(self.f1(x2.view(bsz, -1)).squeeze(-1)), Zero, x1
+        return self.act1(self.f1(x2.view(bsz, -1)).squeeze(-1)), Zero.to(self.device), x1
 
 predict = lambda x: x
