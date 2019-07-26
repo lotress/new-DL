@@ -38,6 +38,13 @@ def initParameters(opt, model):
     if hasattr(model, 'embedding') and isinstance(model.embedding, nn.Embedding):
         model.embedding.weight.data[2:] = torch.load(word2vecPath)
 
+getParameters = (lambda opt, _: amp.master_params(opt.optimizer)) if amp else lambda _, model: model.parameters()
+backward = lambda loss, _: loss.backward()
+if torch.cuda.is_available():
+    def backward(loss, opt):
+        with amp.scale_loss(loss, opt.optimizer) as scaled_loss:
+            scaled_loss.backward()
+
 def trainStep(opt, model, x, y, length, mask):
     opt.optimizer.zero_grad()
     x = x.to(opt.device, non_blocking=True)
@@ -46,13 +53,8 @@ def trainStep(opt, model, x, y, length, mask):
     loss = opt.loss(opt, model, label, *model(x, mask))
     if torch.allclose(loss, nan, equal_nan=True):
         raise Exception('Loss returns NaN')
-    if amp:
-        with amp.scale_loss(loss, opt.optimizer) as scaled_loss:
-            scaled_loss.backward()
-        nn.utils.clip_grad_value_(amp.master_params(opt.optimizer), opt.maxgrad)
-    else:
-        loss.backward()
-        nn.utils.clip_grad_value_(model.parameters(), opt.maxgrad)
+    backward(loss, opt)
+    nn.utils.clip_grad_value_(getParameters(opt, model), opt.maxgrad)
     opt.optimizer.step()
     return float(loss)
 
@@ -61,7 +63,7 @@ def evaluateStep(opt, model, x, y, _, mask):
     out, *others = model(x.to(opt.device, non_blocking=True), mask)
     pred = predict(out)
     if isinstance(pred, torch.Tensor):
-      y = y.to(pred)
+        y = y.to(pred)
     missed = opt.criterion(y, pred, mask)
     return (float(missed.sum()), missed, pred, *others)
 
