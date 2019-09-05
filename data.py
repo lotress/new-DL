@@ -2,22 +2,21 @@ from common import *
 from torch.utils.data import Dataset, DataLoader
 
 dataLength = {'train': 4096, 'val': 256, 'test': 256}
+vocabsize = 8
 
 class Data(Dataset):
     def __init__(self, path):
         super(Data, self).__init__()
         l = dataLength[path]
-        self.lens = torch.randint(4, (l,)) + 1
-        self.mask = torch.zeros((l, 5), dtype=torch.uint8)
-        for i in range(l):
-            self.mask[i, :self.lens[i]].fill_(1)
-        self.data = torch.rand((l, 5)) * self.mask.float()
+        self.lens = torch.ones((l,), dtype=torch.long) * 4
+        self.mask = torch.ones((l, 4), dtype=torch.uint8)
+        self.data = torch.randint(vocabsize - 1, (l, 4), dtype=torch.long) + 1
         self.count = l
     def __len__(self):
         return self.count
     # input, label, length, mask
     def __getitem__(self, ind):
         x = self.data[ind]
-        return x, x.sum(), self.lens[ind], self.mask[ind]
+        return x, x, self.lens[ind], self.mask[ind]
 
 newLoader = lambda path, *args, **kwargs: DataLoader(Data(path), *args, **kwargs)

@@ -6,8 +6,6 @@ from model import Model, predict
 from option import option
 if amp:
     from apex.optimizers import FusedAdam
-torch.manual_seed(args.rank)
-np.random.seed(args.rank)
 getNelement = lambda model: sum(map(lambda p: p.nelement(), model.parameters()))
 l1Reg = lambda acc, cur: acc + cur.abs().sum(dtype=torch.float)
 l2Reg = lambda acc, cur: acc + (cur * cur).sum(dtype=torch.float)
@@ -35,8 +33,8 @@ def initParameters(opt, model):
             nn.init.constant_(next(m.parameters()), 1)
         if opt.reset_parameters:
             opt.reset_parameters()
-    if hasattr(model, 'embedding') and isinstance(model.embedding, nn.Embedding):
-        model.embedding.weight.data[2:] = torch.load(word2vecPath)
+#    if hasattr(model, 'embedding') and isinstance(model.embedding, nn.Embedding):
+#        model.embedding.weight.data[2:] = torch.load(word2vecPath)
 
 getParameters = (lambda opt, _: amp.master_params(opt.optimizer)) if amp else lambda _, model: model.parameters()
 backward = lambda loss, _: loss.backward()
@@ -49,8 +47,8 @@ def trainStep(opt, model, x, y, length, mask):
     opt.optimizer.zero_grad()
     x = x.to(opt.device, non_blocking=True)
     mask = mask.to(opt.device, non_blocking=True)
-    label = y.to(opt.device, dtype=torch.float, non_blocking=True)
-    loss = opt.loss(opt, model, label, *model(x, mask))
+    label = y.to(opt.device, non_blocking=True)
+    loss = opt.loss(opt, model, label, *model(x, mask)).sum()
     if torch.allclose(loss, nan, equal_nan=True):
         raise Exception('Loss returns NaN')
     backward(loss, opt)
@@ -58,13 +56,13 @@ def trainStep(opt, model, x, y, length, mask):
     opt.optimizer.step()
     return float(loss)
 
-def evaluateStep(opt, model, x, y, _, mask):
+def evaluateStep(opt, model, x, y, l, mask):
     mask = mask.to(opt.device, non_blocking=True)
     out, *others = model(x.to(opt.device, non_blocking=True), mask)
-    pred = predict(out)
+    pred = predict(out, l)
     if isinstance(pred, torch.Tensor):
         y = y.to(pred)
-    missed = opt.criterion(y, pred, mask)
+    missed = opt.criterion(y, out, mask)
     return (float(missed.sum()), missed, pred, *others)
 
 def evaluate(opt, model):
@@ -136,9 +134,10 @@ def logBoardStep(opt, model):
         except:
             print(name, param)
 
-torch.manual_seed(args.rank)
-np.random.seed(args.rank)
-model = Model(opt).to(opt.device)
-print('Number of parameters: %i | valid error: %.3f' % (getNelement(model), evaluate(opt, model)))
-train(opt, model)
-torch.save(model.state_dict(), 'model.epoch{}.pth'.format(opt.scheduler.last_epoch))
+if __name__ == '__main__':
+    torch.manual_seed(args.rank)
+    np.random.seed(args.rank)
+    model = Model(opt).to(opt.device)
+    print('Number of parameters: %i | valid error: %.3f' % (getNelement(model), evaluate(opt, model)))
+    train(opt, model)
+    torch.save(model.state_dict(), 'model.epoch{}.pth'.format(opt.scheduler.last_epoch))
