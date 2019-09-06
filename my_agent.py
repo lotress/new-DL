@@ -292,15 +292,6 @@ class MyAgent(TorchAgent):
                            help='size of the token embeddings')
         agent.add_argument('-dr', '--dropout', type=float, default=0.0,
                            help='dropout rate')
-        agent.add_argument(
-            '--fp16', type='bool', default=True, help='Use fp16 computations.'
-        )
-        agent.add_argument(
-            '--split-lines',
-            type='bool',
-            default=True,
-            help='split the dialogue history on newlines and save in separate '
-            'vectors',
-        )
+        argparser.set_defaults(split_lines=True, fp16=True)
         MyAgent.dictionary_class().add_cmdline_args(argparser)
         return agent
