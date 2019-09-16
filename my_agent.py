@@ -81,7 +81,7 @@ class MyAgent(TorchAgent):
         d = super().build_dictionary()
         if 'dict-file' in self.opt:
             d.load(self.opt['dict-file'])
-        return _fixDict(d)
+        return d # _fixDict(d)
 
     def share(self):
         """Share internal states between parent and child instances."""
