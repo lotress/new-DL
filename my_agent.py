@@ -193,6 +193,7 @@ class MyAgent(TorchAgent):
         if not batch.valid_indices or not len(batch.valid_indices):
             return batch
 
+        batch.done_vec = torch.tensor([(1 if ex.get('episode_done') else 0) for ex in batch.observations], dtype=torch.uint8)
         lengths = batch.text_lengths
         if lengths:
             batch.text_lengths = torch.tensor(lengths)
