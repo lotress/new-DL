@@ -6,16 +6,11 @@ from parlai.core.torch_agent import TorchAgent, Output
 from parlai.core.logs import TensorboardLogger
 from parlai.core.distributed_utils import is_distributed
 from model import Model, predict
-from train import opt, initParameters, logBoardStep, nan
+from train import opt, initParameters, nan
 
-def _fixDict(d):
-    key0 = next(iter(d.keys()))
-    d.freq[''] = int(key0)
-    d.ind2tok[0] = ''
-    d.tok2ind[''] = 0
-    del d.freq[key0]
-    del d.tok2ind[key0]
-    return d
+def _isFp16(x):
+    s = x.lower()
+    return 2 if s == 'true' else 0 if s == 'false' else int(x)
 
 class MyAgent(TorchAgent):
     def __init__(self, optAgent, shared=None):
@@ -31,9 +26,24 @@ class MyAgent(TorchAgent):
         opt.vocabsize = len(self.dict)
         opt.__dict__.update(optAgent)
         opt.agent = self
+        opt.fp16 = self.fp16
         torch.manual_seed(args.rank)
         np.random.seed(args.rank)
-        self.writer = TensorboardLogger(optAgent) if optAgent['tensorboard_log'] else 0
+        self.writeVars = 0
+        if optAgent['tensorboard_log']:
+            self.writeVars, *_ = getWriter(writer=TensorboardLogger(optAgent))
+        if self.fp16:
+            try:
+                from apex import amp
+            except ImportError:
+                raise ImportError(
+                    'No fp16 support without apex. Please install it from '
+                    'https://github.com/NVIDIA/apex'
+                )
+            self.getParameters = lambda: amp.master_params(self.optimizer)
+            self.amp = amp
+        else:
+            self.getParameters = lambda: self.model.parameters()
         if not shared:
             model = Model(opt)
             self.model = model
@@ -44,8 +54,6 @@ class MyAgent(TorchAgent):
                 states = {}
                 initParameters(opt, self.model)
             self.model = self.model.to(opt.device)
-            if self.fp16:
-                self.model = self.model.half()
             self.model.train()
             if optAgent.get('numthreads', 1) > 1:
                 self.model.share_memory()
@@ -81,7 +89,7 @@ class MyAgent(TorchAgent):
         d = super().build_dictionary()
         if 'dict-file' in self.opt:
             d.load(self.opt['dict-file'])
-        return d # _fixDict(d)
+        return d
 
     def share(self):
         """Share internal states between parent and child instances."""
@@ -203,6 +211,112 @@ class MyAgent(TorchAgent):
             batch.text_mask = text_mask.cuda() if self.use_cuda else text_mask
         return batch
 
+    def init_optim(self, params, optim_states=None, saved_optim_type=None):
+        """
+        Initialize optimizer with model parameters.
+        """
+        opt = self.opt
+
+        # set up optimizer args
+        lr = opt['learningrate']
+        kwargs = {'lr': lr}
+        if opt.get('weight_decay'):
+            kwargs['weight_decay'] = opt['weight_decay']
+        if opt.get('momentum') > 0 and opt['optimizer'] in ['sgd', 'rmsprop', 'qhm']:
+            # turn on momentum for optimizers that use it
+            kwargs['momentum'] = opt['momentum']
+            if opt['optimizer'] == 'sgd' and opt.get('nesterov', True):
+                # for sgd, maybe nesterov
+                kwargs['nesterov'] = opt.get('nesterov', True)
+            elif opt['optimizer'] == 'qhm':
+                # qhm needs a nu
+                kwargs['nu'] = opt.get('nus', (0.7,))[0]
+        elif opt['optimizer'] == 'adam':
+            # turn on amsgrad for adam
+            # amsgrad paper: https://openreview.net/forum?id=ryQu7f-RZ
+            kwargs['amsgrad'] = True
+        elif opt['optimizer'] == 'qhadam':
+            # set nus for qhadam
+            kwargs['nus'] = opt.get('nus', (0.7, 1.0))
+        if opt['optimizer'] in ['adam', 'sparseadam', 'fused_adam', 'adamax', 'qhadam']:
+            # set betas for optims that use it
+            kwargs['betas'] = opt.get('betas', (0.9, 0.999))
+            # set adam optimizer, but only if user specified it
+            if opt.get('adam_eps'):
+                kwargs['eps'] = opt['adam_eps']
+
+        optim_class = self.optim_opts()[opt['optimizer']]
+        self.optimizer = optim_class(params, **kwargs)
+        if self.fp16:
+            self.model, self.optimizer = self.amp.initialize(self.model, self.optimizer, opt_level="O{}".format(int(self.fp16)))
+
+        if optim_states and saved_optim_type != opt['optimizer']:
+            print('WARNING: not loading optim state since optim class changed.')
+        elif optim_states:
+            optimstate_fp16 = 'loss_scaler' in optim_states
+            if self.fp16 and optimstate_fp16:
+                optim_states['loss_scaler'] = self.optimizer.state_dict()['loss_scaler']
+            elif optimstate_fp16 and not self.fp16:
+                optim_states = optim_states['optimizer_state_dict']
+            elif not optimstate_fp16 and self.fp16:
+                self.optimizer.optimizer.load_state_dict(optim_states)
+                return
+
+            # finally, try to actually load the optimizer state
+            try:
+                self.optimizer.load_state_dict(optim_states)
+            except ValueError:
+                print('WARNING: not loading optim state since model params changed.')
+
+    def backward(self, loss):
+        """
+        Perform a backward pass.
+        """
+        update_freq = self.opt.get('update_freq', 1)
+        if update_freq > 1:
+            # gradient accumulation, but still need to average across the minibatches
+            loss = loss / update_freq
+            # we're doing gradient accumulation, so we don't only want to step
+            # every N updates instead
+            self._number_grad_accum = (self._number_grad_accum + 1) % update_freq
+
+        if self.fp16:
+            delay_unscale = update_freq > 1 and self._number_grad_accum > 0
+            with self.amp.scale_loss(loss, self.optimizer, delay_unscale=delay_unscale) as scaled_loss:
+                scaled_loss.backward()
+        else:
+            loss.backward()
+
+    def update_params(self):
+        """
+        Perform step of optimization.
+        """
+        update_freq = self.opt.get('update_freq', 1)
+        if update_freq > 1 and self._number_grad_accum > 0:
+            return
+
+        # keep track up number of steps, compute warmup factor
+        self._number_training_updates += 1
+
+        # compute warmup adjustment if needed
+        if self.opt.get('warmup_updates', -1) > 0:
+            if not hasattr(self, 'warmup_scheduler'):
+                raise RuntimeError('Looks like you forgot to call build_lr_scheduler')
+            if self._is_lr_warming_up():
+                self.warmup_scheduler.step(epoch=self._number_training_updates)
+
+        if self.opt.get('lr_scheduler') == 'invsqrt' and not self._is_lr_warming_up():
+            # training step scheduler
+            self.scheduler.step(self._number_training_updates)
+
+        if self.opt.get('gradient_clip', -1) > 0:
+            grad_norm = torch.nn.utils.clip_grad_norm_(self.getParameters(), self.opt['gradient_clip'])
+            self.metrics['gnorm'] += grad_norm
+            self.metrics['clip'] += float(grad_norm > self.opt['gradient_clip'])
+
+        self.metrics['updates'] += 1
+        self.optimizer.step()
+
     def train_step(self, batch):
         """Process batch of inputs and targets and train on them.
 
@@ -257,10 +371,16 @@ class MyAgent(TorchAgent):
         metrics['loss'] = self.metrics['loss']
         metrics['error'] = self.metrics['error.sum'] / (self.metrics['eval_exs'] if self.metrics['eval_exs'] else 1)
         metrics['accuracy'] = 1. - metrics['error']
-        if self.writer:
-            logBoardStep(self, self.model)
-        if self.drawVars and 'vars' in self.metrics:
-            self.drawVars(*self.metrics['vars'])
+        if self.writeVars:
+            self.writeVars({'loss': metrics['loss']},
+                histograms=dict(self.model.named_parameters()),
+                n=self.scheduler.last_epoch)
+        if 'vars' in self.metrics:
+            if self.drawVars:
+                self.drawVars(*self.metrics['vars'])
+            if len(self.metrics['vars']) > 1 and self.writeVars:
+                self.writeVars(images={'hidden': self.metrics['vars'][2].unqueeze(1)},
+                    n=self.scheduler.last_epoch)
         if 'pred' in self.metrics:
             print(self.metrics['pred'])
         return metrics
@@ -293,6 +413,8 @@ class MyAgent(TorchAgent):
                            help='size of the token embeddings')
         agent.add_argument('-dr', '--dropout', type=float, default=0.0,
                            help='dropout rate')
-        argparser.set_defaults(split_lines=True, fp16=True)
+        agent.add_argument('--fp16', type=_isFp16, default=2,
+                           help='Amp fp16 optimization level')
+        argparser.set_defaults(split_lines=True)
         MyAgent.dictionary_class().add_cmdline_args(argparser)
         return agent

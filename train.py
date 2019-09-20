@@ -1,6 +1,5 @@
-import torch.optim as optim
-import numpy as np
 from common import *
+import torch.optim as optim
 from data import newLoader
 from model import Model, predict
 from option import option
@@ -115,7 +114,7 @@ def train(opt, model, init=True):
             totalLoss += loss
         valErr = evaluate(opt, model)
         if opt.writer:
-            logBoardStep(opt, model)
+            opt.writer(histograms=dict(model.named_parameters()), n=opt.scheduler.last_epoch)
         print('Epoch #%i | train loss: %.4f | valid error: %.3f | learning rate: %.5f' %
           (opt.scheduler.last_epoch, totalLoss / count, valErr, opt.scheduler.get_lr()[0]))
         if i % 10 == 9:
@@ -125,14 +124,6 @@ def train(opt, model, init=True):
 def saveState(opt, model, epoch):
     torch.save(model.state_dict(), 'model.epoch{}.pth'.format(epoch))
     torch.save((opt.optimizer.state_dict(), opt.scheduler.state_dict()), 'train.epoch{}.pth'.format(epoch))
-
-def logBoardStep(opt, model):
-    step = opt.scheduler.last_epoch
-    for name, param in model.named_parameters():
-        try:
-            opt.writer.add_histogram(name, param.data, step)
-        except:
-            print(name, param)
 
 if __name__ == '__main__':
     torch.manual_seed(args.rank)

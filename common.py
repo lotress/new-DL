@@ -4,6 +4,7 @@ from functools import reduce
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 parser = argparse.ArgumentParser()
 parser.add_argument("--local_rank", type=int, default=0)
 parser.add_argument("--rank", type=int, default=0)
@@ -27,3 +28,18 @@ else:
   amp = None
 print('Using device ' + str(opt.device))
 print('Using default dtype ' + str(opt.dtype))
+
+def getWriter(name='.', writer=None):
+    import torchvision.utils as vutils
+    if not writer:
+        from tensorboardX import SummaryWriter
+        writer = SummaryWriter(name)
+    def write(scalars={}, images={}, histograms={}, n=0):
+        for key in scalars:
+            writer.add_scalar(key, scalars[key], n)
+        for key in images:
+            x = vutils.make_grid(images[key])
+            writer.add_image(key, x, n)
+        for key in histograms:
+            writer.add_histogram(key, histograms[key].data, n)
+    return write, writer
