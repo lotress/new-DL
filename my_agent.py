@@ -6,7 +6,7 @@ from parlai.core.torch_agent import TorchAgent, Output
 from parlai.core.logs import TensorboardLogger
 from parlai.core.distributed_utils import is_distributed
 from model import Model, predict
-from train import opt, initParameters, nan
+from train import opt, initParameters, getParamOptions, nan
 
 def _isFp16(x):
     s = x.lower()
@@ -30,6 +30,7 @@ class MyAgent(TorchAgent):
         torch.manual_seed(args.rank)
         np.random.seed(args.rank)
         self.writeVars = 0
+        self.vars = {}
         if optAgent['tensorboard_log']:
             self.writeVars, *_ = getWriter(writer=TensorboardLogger(optAgent))
         if self.fp16:
@@ -53,20 +54,22 @@ class MyAgent(TorchAgent):
             else:
                 states = {}
                 initParameters(opt, self.model)
-            self.model = self.model.to(opt.device)
+            if self.use_cuda:
+                self.model.cuda()
             self.model.train()
             if optAgent.get('numthreads', 1) > 1:
                 self.model.share_memory()
-            self.init_optim(model.parameters(), states.get('optimizer'), states.get('saved_optim_type', None))
+            paramOptions = getParamOptions(opt, self.model)
+            self.init_optim(paramOptions, states.get('optimizer'), states.get('saved_optim_type', None))
             self.build_lr_scheduler(states, hard_reset=is_finetune)
             if is_distributed():
                 self.model = nn.parallel.DistributedDataParallel(self.model, device_ids=[self.opt['gpu']], broadcast_buffers=False)
+            self.reset()
         else:
             self.model = shared['model']
             self.dict = shared['dict']
             if 'optimizer' in shared:
                 self.optimizer = shared['optimizer']
-        self.reset()
 
     def _get_init_model(self, opt, shared):
         """
@@ -85,10 +88,9 @@ class MyAgent(TorchAgent):
 
     def build_dictionary(self):
         """Return the constructed dictionary, which will be set to self.dict."""
-        self.opt.update(dict(dict_nulltoken='', dict_starttoken='', dict_endtoken='', dict_unktoken=''))
         d = super().build_dictionary()
-        if 'dict-file' in self.opt:
-            d.load(self.opt['dict-file'])
+        if 'dict_file' in self.opt:
+            d.load(self.opt['dict_file'])
         return d
 
     def share(self):
@@ -129,7 +131,7 @@ class MyAgent(TorchAgent):
             handle.write('\n')
 
         # force save the dict
-        dictPath = self.opt['dict-file'] if 'dict-file' in self.opt else path + '.dict.txt'
+        dictPath = self.opt['dict_file'] if 'dict_file' in self.opt else path + '.dict.txt'
         self.dict.save(dictPath, sort=False)
 
     def load_state_dict(self, state_dict):
@@ -361,8 +363,7 @@ class MyAgent(TorchAgent):
 
         pred = predict(output[0], batch.text_lengths)
         text = self._v2t(batch.text_vec[0])
-        self.metrics['pred'] = (text, pred[0])
-        self.metrics['vars'] = (batch.text_vec[0], int(batch.text_lengths[0]), *tuple(v[0] for v in output[2:]))
+        self.vars = (text, pred[0], batch.text_vec[0], int(batch.text_lengths[0]), *tuple(v[0] for v in output[2:]))
         return Output(text=pred)
 
     def report(self):
@@ -375,27 +376,25 @@ class MyAgent(TorchAgent):
             self.writeVars({'loss': metrics['loss']},
                 histograms=dict(self.model.named_parameters()),
                 n=self.scheduler.last_epoch)
-        if 'vars' in self.metrics:
+        if len(self.vars):
             if self.drawVars:
-                self.drawVars(*self.metrics['vars'])
-            if len(self.metrics['vars']) > 1 and self.writeVars:
-                self.writeVars(images={'hidden': self.metrics['vars'][2].unqueeze(1)},
+                self.drawVars(*self.vars[2:])
+            if len(self.vars) > 1 and self.writeVars:
+                self.writeVars(images={'hidden': self.vars[4].unqueeze(1)},
                     n=self.scheduler.last_epoch)
-        if 'pred' in self.metrics:
-            print(self.metrics['pred'])
+            if type(self.vars[0]) == str:
+                print(self.vars[0], self.vars[1])
         return metrics
 
     def reset_metrics(self):
         """Reset metrics calculated by the model back to zero."""
+        self.metrics['loss'] = 0.
         if 'loss.sum' in self.metrics:
-            self.metrics['loss'] = self.metrics['loss.sum'] / (self.metrics['count'] if self.metrics['count'] else 1)
+            count = self.metrics['count'] if 'count' in self.metrics and self.metrics['count'] else 1
+            self.metrics['loss'] = self.metrics['loss.sum'] / count
         super().reset_metrics()
         self.metrics['loss.sum'] = 0.
         self.metrics['error.sum'] = 0.
-        if 'pred' in self.metrics:
-            del self.metrics['pred']
-        if 'vars' in self.metrics:
-            del self.metrics['vars']
         self.metrics['count'] = 0
         self.metrics['eval_exs'] = 0
 

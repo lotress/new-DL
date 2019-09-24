@@ -14,11 +14,11 @@ opt.batchsize = 1
 opt.epochs = 1
 opt.maxgrad = 1. # max gradient
 opt.dropout = 0
-opt.sdt = 0.001 # initial learning rate
+opt.learningrate = 0.001 # initial learning rate
 opt.sdt_decay_step = 10 # how often to reduce learning rate
 opt.criterion = lambda y, out, mask: F.mse_loss(out, y) # criterion for evaluation
 opt.loss = lambda opt, model, y, out, *args: F.mse_loss(out, y) # criterion for loss function
-opt.newOptimizer = (lambda opt, params, _: FusedAdam(params, lr=opt.sdt)) if amp else lambda opt, params, eps: optim.Adam(params, lr=opt.sdt, amsgrad=True, eps=eps)
+opt.newOptimizer = (lambda opt, params, _: FusedAdam(params, lr=opt.learningrate)) if amp else lambda opt, params, eps: optim.Adam(params, lr=opt.learningrate, amsgrad=True, eps=eps)
 opt.writer = 0 # TensorBoard writer
 opt.drawVars = 0
 opt.reset_parameters = 0
@@ -34,6 +34,16 @@ def initParameters(opt, model):
             opt.reset_parameters()
 #    if hasattr(model, 'embedding') and isinstance(model.embedding, nn.Embedding):
 #        model.embedding.weight.data[2:] = torch.load(word2vecPath)
+
+def getParamOptions(opt, model, *config):
+    res = []
+    s = set()
+    base = opt.learningrate
+    for m, k in config:
+        s = s.union(set(m.parameters()))
+        res.append(dict(params=m.parameters(), lr=k * base))
+    res.append({'params': filter(lambda p: not p in s, model.parameters())})
+    return res
 
 getParameters = (lambda opt, _: amp.master_params(opt.optimizer)) if amp else lambda _, model: model.parameters()
 backward = lambda loss, _: loss.backward()
@@ -78,7 +88,8 @@ def evaluate(opt, model):
     return totalErr / count
 
 def initTrain(opt, model, epoch=None):
-    opt.optimizer = opt.newOptimizer(opt, model.parameters(), 1e-8)
+    paramOptions = getParamOptions(opt, model)
+    opt.optimizer = opt.newOptimizer(opt, paramOptions, 1e-8)
     if opt.sdt_decay_step > 0:
         opt.scheduler = optim.lr_scheduler.StepLR(opt.optimizer, opt.sdt_decay_step, gamma=0.5)
     else:
