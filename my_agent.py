@@ -369,6 +369,9 @@ class MyAgent(TorchAgent):
     def report(self):
         """Return metrics calculated by the model."""
         metrics = super().report()
+        if 'loss.sum' in self.metrics:
+            count = self.metrics['count'] if 'count' in self.metrics and self.metrics['count'] else 1
+            self.metrics['loss'] = self.metrics['loss.sum'] / count
         metrics['loss'] = self.metrics['loss']
         metrics['error'] = self.metrics['error.sum'] / (self.metrics['eval_exs'] if self.metrics['eval_exs'] else 1)
         metrics['accuracy'] = 1. - metrics['error']
@@ -388,11 +391,8 @@ class MyAgent(TorchAgent):
 
     def reset_metrics(self):
         """Reset metrics calculated by the model back to zero."""
-        self.metrics['loss'] = 0.
-        if 'loss.sum' in self.metrics:
-            count = self.metrics['count'] if 'count' in self.metrics and self.metrics['count'] else 1
-            self.metrics['loss'] = self.metrics['loss.sum'] / count
         super().reset_metrics()
+        self.metrics['loss'] = 0.
         self.metrics['loss.sum'] = 0.
         self.metrics['error.sum'] = 0.
         self.metrics['count'] = 0
