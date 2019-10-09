@@ -270,6 +270,94 @@ class MyAgent(TorchAgent):
             except ValueError:
                 print('WARNING: not loading optim state since model params changed.')
 
+    def build_lr_scheduler(self, states=None, hard_reset=False):
+        """
+        Create the learning rate scheduler, and assign it to self.scheduler.
+        """
+        # first make sure there are no null pointers
+        if states is None:
+            states = {}
+        optimizer = self.optimizer
+
+        warmup_updates = self.opt.get('warmup_updates', -1)
+        updates_so_far = states.get('number_training_updates', 0)
+        if warmup_updates > 0 and (updates_so_far < warmup_updates or hard_reset):
+
+            def _warmup_lr(step):
+                start = self.opt['warmup_rate']
+                end = 1.0
+                progress = min(1.0, step / self.opt['warmup_updates'])
+                lr_mult = start + (end - start) * progress
+                return lr_mult
+
+            self.warmup_scheduler = optim.lr_scheduler.LambdaLR(optimizer, _warmup_lr)
+        else:
+            self.warmup_scheduler = None
+
+        patience = self.opt.get('lr_scheduler_patience', 3)
+        decay = self.opt.get('lr_scheduler_decay', 0.5)
+
+        if self.opt.get('lr_scheduler') == 'none':
+            self.scheduler = None
+        elif decay == 1.0:
+            warn_once(
+                "Your LR decay is set to 1.0. Assuming you meant you wanted "
+                "to disable learning rate scheduling. Adjust --lr-scheduler-decay "
+                "if this is not correct."
+            )
+            self.scheduler = None
+        elif self.opt.get('lr_scheduler') == 'reduceonplateau':
+            self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer, 'min', factor=decay, patience=patience, verbose=True
+            )
+        elif self.opt.get('lr_scheduler') == 'fixed':
+            self.scheduler = optim.lr_scheduler.StepLR(optimizer, patience, gamma=decay)
+        elif self.opt.get('lr_scheduler') == 'invsqrt':
+            if self.opt.get('warmup_updates', -1) <= 0:
+                raise ValueError(
+                    '--lr-scheduler invsqrt requires setting --warmup-updates'
+                )
+            warmup_updates = self.opt['warmup_updates']
+            decay_factor = np.sqrt(max(1, warmup_updates))
+
+            def _invsqrt_lr(step):
+                return decay_factor / np.sqrt(max(1, step))
+
+            self.scheduler = optim.lr_scheduler.LambdaLR(optimizer, _invsqrt_lr)
+        else:
+            raise ValueError(
+                "Don't know what to do with lr_scheduler '{}'".format(
+                    self.opt.get('lr_scheduler')
+                )
+            )
+
+        # time to load LR state from the checkpoint, if possible.
+        if (
+            # there is already an old LR scheduler saved on disk
+            states
+            and
+            # and the old LR scheduler is different
+            states.get('lr_scheduler_type') != self.opt['lr_scheduler']
+            and
+            # and we're not already using a fresh scheduler
+            not hard_reset
+        ):
+            # the LR scheduler changed, start things fresh
+            warn_once("LR scheduler is different from saved. Starting fresh!")
+            hard_reset = True
+
+        if hard_reset:
+            # We're not going to use the LR schedule, let's just exit
+            return
+
+        # do the actual loading (if possible)
+        if 'number_training_updates' in states:
+            self._number_training_updates = states['number_training_updates']
+        if self.scheduler and 'lr_scheduler' in states:
+            self.scheduler.load_state_dict(states['lr_scheduler'])
+        if states.get('warmup_scheduler') and getattr(self, 'warmup_scheduler', None):
+            self.warmup_scheduler.load_state_dict(states['warmup_scheduler'])
+
     def backward(self, loss):
         """
         Perform a backward pass.
@@ -387,6 +475,7 @@ class MyAgent(TorchAgent):
                     n=self.scheduler.last_epoch)
             if type(self.vars[0]) == str:
                 print(self.vars[0], self.vars[1])
+            self.vars = []
         return metrics
 
     def reset_metrics(self):
