@@ -4,7 +4,7 @@ import json
 import numpy as np
 from parlai.core.torch_agent import TorchAgent, Output
 from parlai.core.logs import TensorboardLogger
-from parlai.core.distributed_utils import is_distributed
+from parlai.utils.distributed import is_distributed
 from model import Model, predict
 from train import opt, initParameters, getParamOptions, nan
 
