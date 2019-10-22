@@ -18,7 +18,7 @@ opt.maxgrad = 1. # max gradient
 opt.dropout = 0
 opt.learningrate = 0.001 # initial learning rate
 opt.sdt_decay_step = 10 # how often to reduce learning rate
-opt.criterion = lambda y, out, mask: F.mse_loss(out, y) # criterion for evaluation
+opt.criterion = lambda y, out, mask, *args: F.mse_loss(out, y) # criterion for evaluation
 opt.loss = lambda opt, model, y, out, *args: F.mse_loss(out, y) # criterion for loss function
 opt.newOptimizer = (lambda opt, params, _: FusedAdam(params, lr=opt.learningrate)) if amp else lambda opt, params, eps: optim.Adam(params, lr=opt.learningrate, amsgrad=True, eps=eps)
 opt.writer = 0 # TensorBoard writer
@@ -74,7 +74,7 @@ def evaluateStep(opt, model, x, y, l, *args):
     pred = predict(out, l)
     if isinstance(pred, torch.Tensor):
         y = y.to(pred)
-    missed = opt.criterion(y, out, mask)
+    missed = opt.criterion(y, out, *args)
     return (float(missed.sum()), missed, pred, *others)
 
 def evaluate(opt, model):
