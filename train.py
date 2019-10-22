@@ -32,7 +32,7 @@ def initParameters(opt, model):
         if isinstance(m, nn.PReLU):
             nn.init.constant_(next(m.parameters()), 1)
         if opt.reset_parameters:
-            opt.reset_parameters()
+            opt.reset_parameters(opt, model)
 #    if hasattr(model, 'embedding') and isinstance(model.embedding, nn.Embedding):
 #        model.embedding.weight.data[2:] = torch.load(word2vecPath)
 
