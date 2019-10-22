@@ -9,6 +9,7 @@ getNelement = lambda model: sum(map(lambda p: p.nelement(), model.parameters()))
 l1Reg = lambda acc, cur: acc + cur.abs().sum(dtype=torch.float)
 l2Reg = lambda acc, cur: acc + (cur * cur).sum(dtype=torch.float)
 nan = torch.tensor(float('nan'), device=opt.device)
+toDevice = lambda a, device: tuple(map(lambda x: x.to(device, non_blocking=True) if isinstance(x, torch.Tensor) else x, a))
 
 opt.batchsize = 1
 opt.epochs = 1
@@ -52,12 +53,12 @@ if torch.cuda.is_available():
         with amp.scale_loss(loss, opt.optimizer) as scaled_loss:
             scaled_loss.backward()
 
-def trainStep(opt, model, x, y, length, mask):
+def trainStep(opt, model, x, y, length, *args):
     opt.optimizer.zero_grad()
     x = x.to(opt.device, non_blocking=True)
-    mask = mask.to(opt.device, non_blocking=True)
     label = y.to(opt.device, non_blocking=True)
-    loss = opt.loss(opt, model, label, *model(x, mask)).sum()
+    args = toDevice(args, opt.device)
+    loss = opt.loss(opt, model, label, *model(x, *args)).sum()
     if torch.allclose(loss, nan, equal_nan=True):
         raise Exception('Loss returns NaN')
     backward(loss, opt)
@@ -65,9 +66,9 @@ def trainStep(opt, model, x, y, length, mask):
     opt.optimizer.step()
     return float(loss)
 
-def evaluateStep(opt, model, x, y, l, mask):
-    mask = mask.to(opt.device, non_blocking=True)
-    out, *others = model(x.to(opt.device, non_blocking=True), mask)
+def evaluateStep(opt, model, x, y, l, *args):
+    args = toDevice(args, opt.device)
+    out, *others = model(x.to(opt.device, non_blocking=True), *args)
     pred = predict(out, l)
     if isinstance(pred, torch.Tensor):
         y = y.to(pred)
@@ -78,9 +79,9 @@ def evaluate(opt, model):
     model.eval()
     totalErr = 0
     count = 0
-    for x, y, l, mask in newLoader('val', batch_size=opt.batchsize):
+    for x, y, l, *args in newLoader('val', batch_size=opt.batchsize):
         count += int(l.sum())
-        err, _, pred, _, *others = evaluateStep(opt, model, x, y, l, mask)
+        err, _, pred, _, *others = evaluateStep(opt, model, x, y, l, *args)
         totalErr += err
     if opt.drawVars:
         opt.drawVars(x[0], l[0], *tuple(v[0] for v in others))
@@ -118,10 +119,10 @@ def train(opt, model, init=True):
         totalLoss = 0
         model.train()
         opt.optimizer.zero_grad()
-        for x, y, l, mask in newLoader('train', batch_size=opt.batchsize, shuffle=True):
+        for x, y, l, *args in newLoader('train', batch_size=opt.batchsize, shuffle=True):
             length = int(l.sum())
             count += length
-            loss = trainStep(opt, model, x, y, length, mask)
+            loss = trainStep(opt, model, x, y, length, *args)
             totalLoss += loss
         valErr = evaluate(opt, model)
         if opt.writer:
