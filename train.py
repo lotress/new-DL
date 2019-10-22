@@ -90,11 +90,12 @@ def evaluate(opt, model):
 
 def initTrain(opt, model, epoch=None):
     paramOptions = getParamOptions(opt, model)
-    opt.optimizer = opt.newOptimizer(opt, paramOptions, 1e-8)
+    eps = 1e-4 if opt.fp16 else 1e-8
+    opt.optimizer = opt.newOptimizer(opt, paramOptions, eps)
     if opt.sdt_decay_step > 0:
         opt.scheduler = optim.lr_scheduler.StepLR(opt.optimizer, opt.sdt_decay_step, gamma=0.5)
     else:
-        opt.scheduler = optim.lr_scheduler.StepLR(opt.optimizer, 1e6, gamma=1)
+        opt.scheduler = None
     if type(epoch) == int:
         state = torch.load('train.epoch{}.pth'.format(epoch), map_location='cpu')
         opt.optimizer.load_state_dict(state[0])
@@ -112,13 +113,13 @@ def train(opt, model, init=True):
     if init:
         initTrain(opt, model, init)
     if amp:
-        model, opt.optimizer = amp.initialize(model, opt.optimizer, opt_level="O2", keep_batchnorm_fp32=False)
+        model, opt.optimizer = amp.initialize(model, opt.optimizer, opt_level="O{}".format(opt.fp16))
     for i in range(opt.scheduler.last_epoch, opt.epochs):
-        opt.scheduler.step()
+        if opt.scheduler:
+            opt.scheduler.step()
         count = 0
         totalLoss = 0
         model.train()
-        opt.optimizer.zero_grad()
         for x, y, l, *args in newLoader('train', batch_size=opt.batchsize, shuffle=True):
             length = int(l.sum())
             count += length
