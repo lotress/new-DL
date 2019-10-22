@@ -10,6 +10,7 @@ l1Reg = lambda acc, cur: acc + cur.abs().sum(dtype=torch.float)
 l2Reg = lambda acc, cur: acc + (cur * cur).sum(dtype=torch.float)
 nan = torch.tensor(float('nan'), device=opt.device)
 toDevice = lambda a, device: tuple(map(lambda x: x.to(device, non_blocking=True) if isinstance(x, torch.Tensor) else x, a))
+detach0 = lambda x: x[0].detach() if isinstance(x, torch.Tensor) else x[0]
 
 opt.batchsize = 1
 opt.epochs = 1
@@ -23,6 +24,7 @@ opt.newOptimizer = (lambda opt, params, _: FusedAdam(params, lr=opt.learningrate
 opt.writer = 0 # TensorBoard writer
 opt.drawVars = 0
 opt.reset_parameters = 0
+opt.toImages = 0
 opt.__dict__.update(option)
 
 def initParameters(opt, model):
@@ -83,10 +85,11 @@ def evaluate(opt, model):
         count += int(l.sum())
         err, _, pred, _, *others = evaluateStep(opt, model, x, y, l, *args)
         totalErr += err
+    vs = tuple(map(detach0, others))
     if opt.drawVars:
-        opt.drawVars(x[0], l[0], *tuple(v[0] for v in others))
+        opt.drawVars(x[0], l[0], *vs)
         print(pred[0])
-    return totalErr / count
+    return totalErr / count, opt.toImages(*vs) if opt.toImages else {}
 
 def initTrain(opt, model, epoch=None):
     paramOptions = getParamOptions(opt, model)
@@ -125,11 +128,12 @@ def train(opt, model, init=True):
             count += length
             loss = trainStep(opt, model, x, y, length, *args)
             totalLoss += loss
-        valErr = evaluate(opt, model)
+        valErr, vs = evaluate(opt, model)
+        avgLoss = totalLoss / count
         if opt.writer:
-            opt.writer(histograms=dict(model.named_parameters()), n=opt.scheduler.last_epoch)
+            opt.writer({'loss': avgLoss}, images=vs, histograms=dict(model.named_parameters()), n=opt.scheduler.last_epoch)
         print('Epoch #%i | train loss: %.4f | valid error: %.3f | learning rate: %.5f' %
-          (opt.scheduler.last_epoch, totalLoss / count, valErr, opt.scheduler.get_lr()[0]))
+          (opt.scheduler.last_epoch, avgLoss, valErr, opt.scheduler.get_lr()[0]))
         if i % 10 == 9:
             saveState(opt, model, opt.scheduler.last_epoch)
     return valErr
@@ -142,6 +146,6 @@ if __name__ == '__main__':
     torch.manual_seed(args.rank)
     np.random.seed(args.rank)
     model = Model(opt).to(opt.device)
-    print('Number of parameters: %i | valid error: %.3f' % (getNelement(model), evaluate(opt, model)))
+    print('Number of parameters: %i | valid error: %.3f' % (getNelement(model), evaluate(opt, model)[0]))
     train(opt, model)
     torch.save(model.state_dict(), 'model.epoch{}.pth'.format(opt.scheduler.last_epoch))
