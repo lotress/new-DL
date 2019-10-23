@@ -118,8 +118,6 @@ def train(opt, model, init=True):
     if amp:
         model, opt.optimizer = amp.initialize(model, opt.optimizer, opt_level="O{}".format(opt.fp16))
     for i in range(opt.scheduler.last_epoch, opt.epochs):
-        if opt.scheduler:
-            opt.scheduler.step()
         count = 0
         totalLoss = 0
         model.train()
@@ -128,6 +126,8 @@ def train(opt, model, init=True):
             count += length
             loss = trainStep(opt, model, x, y, length, *args)
             totalLoss += loss
+        if opt.scheduler:
+            opt.scheduler.step()
         valErr, vs = evaluate(opt, model)
         avgLoss = totalLoss / count
         if opt.writer:
