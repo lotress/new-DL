@@ -96,7 +96,8 @@ def initTrain(opt, model, epoch=None):
     eps = 1e-4 if opt.fp16 else 1e-8
     opt.optimizer = opt.newOptimizer(opt, paramOptions, eps)
     if opt.sdt_decay_step > 0:
-        opt.scheduler = optim.lr_scheduler.StepLR(opt.optimizer, opt.sdt_decay_step, gamma=0.5)
+        gamma = opt.gamma if hasattr(opt, 'gamma') else .5
+        opt.scheduler = optim.lr_scheduler.StepLR(opt.optimizer, opt.sdt_decay_step, gamma=gamma)
     else:
         opt.scheduler = None
     if type(epoch) == int:
