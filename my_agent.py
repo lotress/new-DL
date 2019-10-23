@@ -399,6 +399,9 @@ class MyAgent(TorchAgent):
             # training step scheduler
             self.scheduler.step(self._number_training_updates)
 
+        if hasattr(opt, 'gradF'):
+            opt.gradF(self.model)
+
         if self.opt.get('gradient_clip', -1) > 0:
             grad_norm = torch.nn.utils.clip_grad_norm_(self.getParameters(), self.opt['gradient_clip'])
             self.metrics['gnorm'] += grad_norm

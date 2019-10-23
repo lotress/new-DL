@@ -64,6 +64,8 @@ def trainStep(opt, model, x, y, length, *args):
     if torch.allclose(loss, nan, equal_nan=True):
         raise Exception('Loss returns NaN')
     backward(loss, opt)
+    if hasattr(opt, 'gradF'):
+        opt.gradF(model)
     nn.utils.clip_grad_value_(getParameters(opt, model), opt.maxgrad)
     opt.optimizer.step()
     return float(loss)
