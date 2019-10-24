@@ -29,7 +29,7 @@ else:
 print('Using device ' + str(opt.device))
 print('Using default dtype ' + str(opt.dtype))
 
-upTruncBy8 = lambda x: (-x & 0xfffffff8 ^ 0xffffffff) + 1
+upTruncBy8 = lambda x: (-x & -8 ^ -1) + 1
 
 def getWriter(name='.', writer=None):
     import torchvision.utils as vutils
