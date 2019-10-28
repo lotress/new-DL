@@ -427,8 +427,9 @@ class MyAgent(TorchAgent):
             raise Exception('Loss returns NaN')
         self.backward(loss)
         self.update_params()
-        self.metrics['count'] += int(batch.text_lengths.sum())
-        self.metrics['loss.sum'] += float(loss)
+        count = int(batch.text_lengths.sum())
+        self.metrics['count'] += count
+        self.metrics['loss.sum'] += float(loss) * count
         return # omit response for speed
         #pred = predict(output[0], batch.text_lengths)
         #return Output(text=pred)

@@ -68,7 +68,7 @@ def trainStep(opt, model, x, y, length, *args):
         opt.gradF(model, getParameters(opt, model))
     nn.utils.clip_grad_value_(getParameters(opt, model), opt.maxgrad)
     opt.optimizer.step()
-    return float(loss)
+    return float(loss) * float(length)
 
 def evaluateStep(opt, model, x, y, l, *args):
     args = toDevice(args, opt.device)
