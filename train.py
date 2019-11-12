@@ -157,6 +157,7 @@ if __name__ == '__main__':
   model = Model(opt).to(opt.device)
   initParameters(opt, model)
   print('Number of parameters: {} | valid error: {:.3f}'.format(getNelement(model), evaluate(opt, model)[0]))
+  initTrain(opt, model)
   train(opt, model, False)
   modelName = 'model.epoch{}.pth'.format(opt.scheduler.last_epoch) if hasattr(opt, 'scheduler') else 'model.pth'
   torch.save(model.state_dict(), modelName)
