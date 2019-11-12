@@ -135,8 +135,8 @@ def train(opt, model, init=True):
         avgLoss = totalLoss / count
         if opt.writer:
             opt.writer({'loss': avgLoss}, images=vs, histograms=dict(model.named_parameters()), n=opt.scheduler.last_epoch)
-        print('Epoch #%i | train loss: %.4f | valid error: %.3f | learning rate: %.5f' %
-          (opt.scheduler.last_epoch, avgLoss, valErr, opt.scheduler.get_lr()[0]))
+        print('Epoch #{} | train loss: {:6f} | valid error: {:.3f} | learning rate: {:.5f}'
+              .format(opt.scheduler.last_epoch, avgLoss, valErr, opt.scheduler.get_lr()[0]))
         if i % 10 == 9:
             saveState(opt, model, opt.scheduler.last_epoch)
     return valErr
@@ -150,6 +150,6 @@ if __name__ == '__main__':
     np.random.seed(args.rank)
     model = Model(opt).to(opt.device)
     initParameters(opt, model)
-    print('Number of parameters: %i | valid error: %.3f' % (getNelement(model), evaluate(opt, model)[0]))
+    print('Number of parameters: {} | valid error: {:.3f}'.format(getNelement(model), evaluate(opt, model)[0]))
     train(opt, model, False)
     torch.save(model.state_dict(), 'model.epoch{}.pth'.format(opt.scheduler.last_epoch))
