@@ -48,7 +48,7 @@ def trainStep(opt, model, x, y, length, *args):
   opt.optimizer.step()
   if hasattr(opt, 'paraF'):
     opt.paraF(opt, model)
-  return float(loss) * float(length)
+  return float(loss)
 
 def evaluateStep(opt, model, x, y, l, *args):
   args = toDevice(args, opt.device)
@@ -100,22 +100,34 @@ def train(opt, model, init=True):
     initTrain(opt, model, init)
   if opt.cuda and opt.fp16:
     model, opt.optimizer = amp.initialize(model, opt.optimizer, opt_level="O{}".format(opt.fp16))
-  for i in range(opt.scheduler.last_epoch, opt.epochs):
+  if opt.cuda:
+    print('GPU memory allocated before training: {} bytes'.format(torch.cuda.max_memory_allocated()))
+    torch.cuda.reset_max_memory_allocated()
+  last_epoch = opt.scheduler.last_epoch
+  start = time()
+  for i in range(last_epoch, opt.epochs):
     count = 0
     totalLoss = 0
     model.train()
     for x, y, l, *args in newLoader('train', batch_size=opt.batchsize, shuffle=True):
       length = int(l.sum())
-      count += length
-      loss = trainStep(opt, model, x, y, length, *args)
+      profile = opt.profile and i == last_epoch and count == opt.batchsize
+      with torch.autograd.profiler.profile(enabled=profile, use_cuda=opt.cuda) as prof:
+        loss = trainStep(opt, model, x, y, length, *args)
+      if profile:
+        print(prof.key_averages().table())
+        prof.export_chrome_trace('train-prof.trace')
       totalLoss += loss
+      count += length
+      if opt.cuda and i == last_epoch and count == opt.batchsize:
+        print('GPU memory usage of one minibatch: {} bytes'.format(torch.cuda.max_memory_allocated()))
     if opt.scheduler:
       opt.scheduler.step()
     valErr, vs = evaluate(opt, model)
     avgLoss = totalLoss / count
     if opt.writer:
       opt.writer({'loss': avgLoss}, images=vs, histograms=dict(model.named_parameters()), n=opt.scheduler.last_epoch)
-    print('Epoch #{} | train loss: {:6f} | valid error: {:.4f} | learning rate: {:.5f} | time elapsed: {:6f}'
+    print('Epoch #{} | train loss: {:6.6f} | valid error: {:.4f} | learning rate: {:.5f} | time elapsed: {:6.2f}s'
           .format(opt.scheduler.last_epoch, avgLoss, valErr, opt.scheduler.get_lr()[0], time() - start))
     if i % 10 == 9:
       saveState(opt, model, opt.scheduler.last_epoch)
@@ -142,6 +154,7 @@ opt.writer = 0 # TensorBoard writer
 opt.drawVars = 0
 opt.reset_parameters = 0
 opt.toImages = 0
+opt.profile = False
 opt.__dict__.update(option)
 if opt.cuda and opt.fp16 > 1:
   getParameters = lambda opt, _: amp.master_params(opt.optimizer)

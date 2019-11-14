@@ -427,7 +427,7 @@ class MyAgent(TorchAgent):
     self.update_params()
     count = int(batch.text_lengths.sum())
     self.metrics['count'] += count
-    self.metrics['loss.sum'] += float(loss) * count
+    self.metrics['loss.sum'] += float(loss)
     return # omit response for speed
     #pred = predict(output[0], batch.text_lengths)
     #return Output(text=pred)
