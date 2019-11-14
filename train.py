@@ -1,4 +1,5 @@
 from common import *
+from time import time
 import torch.optim as optim
 from data import newLoader
 from model import Model, predict
@@ -114,8 +115,8 @@ def train(opt, model, init=True):
     avgLoss = totalLoss / count
     if opt.writer:
       opt.writer({'loss': avgLoss}, images=vs, histograms=dict(model.named_parameters()), n=opt.scheduler.last_epoch)
-    print('Epoch #{} | train loss: {:6f} | valid error: {:.4f} | learning rate: {:.5f}'
-          .format(opt.scheduler.last_epoch, avgLoss, valErr, opt.scheduler.get_lr()[0]))
+    print('Epoch #{} | train loss: {:6f} | valid error: {:.4f} | learning rate: {:.5f} | time elapsed: {:6f}'
+          .format(opt.scheduler.last_epoch, avgLoss, valErr, opt.scheduler.get_lr()[0], time() - start))
     if i % 10 == 9:
       saveState(opt, model, opt.scheduler.last_epoch)
   return valErr
