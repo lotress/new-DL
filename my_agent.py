@@ -381,6 +381,17 @@ class MyAgent(TorchAgent):
     if update_freq > 1 and self._number_grad_accum > 0:
       return
 
+    if hasattr(opt, 'gradF'):
+      opt.gradF(self.model, self.getParameters())
+
+    if self.opt.get('gradient_clip', -1) > 0:
+      grad_norm = torch.nn.utils.clip_grad_norm_(self.getParameters(), self.opt['gradient_clip'])
+      self.metrics['gnorm'] += grad_norm
+      self.metrics['clip'] += float(grad_norm > self.opt['gradient_clip'])
+
+    self.metrics['updates'] += 1
+    self.optimizer.step()
+
     # keep track up number of steps, compute warmup factor
     self._number_training_updates += 1
 
@@ -395,16 +406,6 @@ class MyAgent(TorchAgent):
       # training step scheduler
       self.scheduler.step(self._number_training_updates)
 
-    if hasattr(opt, 'gradF'):
-      opt.gradF(self.model, self.getParameters())
-
-    if self.opt.get('gradient_clip', -1) > 0:
-      grad_norm = torch.nn.utils.clip_grad_norm_(self.getParameters(), self.opt['gradient_clip'])
-      self.metrics['gnorm'] += grad_norm
-      self.metrics['clip'] += float(grad_norm > self.opt['gradient_clip'])
-
-    self.metrics['updates'] += 1
-    self.optimizer.step()
     if hasattr(opt, 'paraF'):
       opt.paraF(opt, self.model)
 
