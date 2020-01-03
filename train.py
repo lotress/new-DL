@@ -34,11 +34,32 @@ def getParamOptions(opt, model, *config):
   res.append({'params': filter(lambda p: not p in s, model.parameters())})
   return res
 
-def trainStep(opt, model, x, y, length, *args):
+def step(opt, model, x, y, l, args):
+  args = toDevice(args, opt.device)
+  x, y, l, *args = opt.startEnv(*toDevice((x, y), opt.device), l, *args)
+  episode = True
+  i, extraLoss = 0, 0
+  out, others, rewards = [], [], []
+  while episode:
+    o, el, *os = model(x, *args)
+    extraLoss += el
+    if opt.cumOut:
+      out.append(o)
+      others.append(os)
+    else:
+      out = o
+      others = os
+    pred = predict(out, l)
+    i += 1
+    episode, reward, x, l, *args = opt.stepEnv(i, pred, l, *args)
+    rewards.append(reward)
+  return pred, rewards, y, out, extraLoss, others
+
+def trainStep(opt, model, x, y, l, *args):
   optimizer = opt.optimizer
   optimizer.zero_grad()
-  d = opt.device
-  loss = opt.loss(opt, model, y.to(d), *model(x.to(d), *toDevice(args, d))).sum()
+  _, rewards, y, *out = step(opt, model, x, y, l, args)
+  loss = opt.loss(opt, model, y, *out, rewards=rewards).sum()
   if torch.allclose(loss, nan, equal_nan=True):
     raise Exception('Loss returns NaN')
   backward(loss, opt)
@@ -51,11 +72,7 @@ def trainStep(opt, model, x, y, length, *args):
   return float(loss)
 
 def evaluateStep(opt, model, x, y, l, *args):
-  args = toDevice(args, opt.device)
-  out, *others = model(x.to(opt.device, non_blocking=True), *args)
-  pred = predict(out, l)
-  if isinstance(pred, torch.Tensor):
-    y = y.to(pred)
+  pred, _, y, out, _, *others = step(opt, model, x, y, l, args)
   missed = opt.criterion(y, out, *args)
   return (float(missed.sum()), missed, pred, *others)
 
@@ -113,7 +130,7 @@ def train(opt, model, init=True):
       length = int(l.sum())
       profile = opt.profile and i == last_epoch and count == opt.batchsize
       with torch.autograd.profiler.profile(enabled=profile, use_cuda=opt.cuda) as prof:
-        loss = trainStep(opt, model, x, y, length, *args)
+        loss = trainStep(opt, model, x, y, l, *args)
       if profile:
         print(prof.key_averages().table())
         prof.export_chrome_trace('train-prof.trace')
@@ -148,8 +165,11 @@ opt.dropout = 0
 opt.learningrate = 0.001 # initial learning rate
 opt.sdt_decay_step = 10 # how often to reduce learning rate
 opt.criterion = lambda y, out, mask, *args: F.mse_loss(out, y) # criterion for evaluation
-opt.loss = lambda opt, model, y, out, *args: F.mse_loss(out, y) # criterion for loss function
+opt.loss = lambda opt, model, y, out, *args, **_: F.mse_loss(out, y) # criterion for loss function
 opt.newOptimizer = (lambda opt, params, _: FusedAdam(params, lr=opt.learningrate)) if amp else lambda opt, params, eps: optim.Adam(params, lr=opt.learningrate, amsgrad=True, eps=eps)
+opt.startEnv = lambda *args: args
+opt.stepEnv = lambda *_: False, 1., None, None
+opt.cumOut = False
 opt.writer = 0 # TensorBoard writer
 opt.drawVars = 0
 opt.reset_parameters = 0
