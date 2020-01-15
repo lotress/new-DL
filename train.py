@@ -34,7 +34,7 @@ def getParamOptions(opt, model, *config):
   res.append({'params': filter(lambda p: not p in s, model.parameters())})
   return res
 
-def step(opt, model, x, y, l, args):
+def step(opt, model, x, y, l, args, doPredict=True):
   args = toDevice(args, opt.device)
   x, y, l, *args = opt.startEnv(*toDevice((x, y), opt.device), l, *args)
   episode = True
@@ -49,7 +49,7 @@ def step(opt, model, x, y, l, args):
     else:
       out = o
       others = os
-    pred = predict(out, l, x, *args)
+    pred = predict(out, l, x, *args) if doPredict else None
     i += 1
     episode, reward, x, l, *args = opt.stepEnv(i, pred, l, *args)
     rewards.append(reward)
@@ -58,7 +58,7 @@ def step(opt, model, x, y, l, args):
 def trainStep(opt, model, x, y, l, *args):
   optimizer = opt.optimizer
   optimizer.zero_grad()
-  _, rewards, y, *out = step(opt, model, x, y, l, args)
+  _, rewards, y, *out = step(opt, model, x, y, l, args, False)
   loss = opt.loss(opt, model, y, *out, rewards=rewards).sum()
   if torch.allclose(loss, nan, equal_nan=True):
     raise Exception('Loss returns NaN')
