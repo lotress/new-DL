@@ -49,7 +49,7 @@ def step(opt, model, x, y, l, args):
     else:
       out = o
       others = os
-    pred = predict(out, l)
+    pred = predict(out, l, x, *args)
     i += 1
     episode, reward, x, l, *args = opt.stepEnv(i, pred, l, *args)
     rewards.append(reward)

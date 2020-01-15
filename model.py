@@ -28,4 +28,4 @@ class Model(nn.Module):
 with open('integrationTests.dict', encoding='utf-8') as fd:
     idict = [line.split('\t')[0] for line in fd if not line.startswith('__FP16_PAD_')]
     vocab = len(idict)
-predict = lambda x, l: [' '.join(idict[i] for i in seq[:l[k]]) for k, seq in enumerate(x[:,:,1:vocab].max(-1)[1] + 1)]
+predict = lambda out, l, x, mask: [' '.join(idict[i] for i in seq[:l[k]]) for k, seq in enumerate(x[:,:,1:vocab].max(-1)[1] + 1)]

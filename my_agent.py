@@ -430,7 +430,7 @@ class MyAgent(TorchAgent):
     self.metrics['count'] += count
     self.metrics['loss.sum'] += float(loss)
     return # omit response for speed
-    #pred = predict(output[0], batch.text_lengths)
+    #pred = predict(output[0], batch.text_lengths, batch.text_vec, batch.text_mask)
     #return Output(text=pred)
 
   def eval_step(self, batch):
@@ -452,7 +452,7 @@ class MyAgent(TorchAgent):
       self.metrics['error.sum'] += float(missed.sum())
       self.metrics['eval_exs'] += int(batch.text_lengths.sum())
 
-    pred = predict(output[0], batch.text_lengths)
+    pred = predict(output[0], batch.text_lengths, batch.text_vec, batch.text_mask)
     text = self._v2t(batch.text_vec[0])
     self.vars = (text, pred[0], batch.text_vec[0], int(batch.text_lengths[0]), *tuple(v[0] for v in output[2:]))
     return Output(text=pred)
