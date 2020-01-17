@@ -1,4 +1,5 @@
 from common import *
+import sys
 from time import time
 import torch.optim as optim
 from data import newLoader
@@ -90,7 +91,8 @@ def evaluate(opt, model, path='val'):
     print(pred[0])
   return totalErr / count, opt.toImages(*vs) if opt.toImages else {}
 
-def initTrain(opt, model, epoch=None):
+def initTrain(opt, epoch=None):
+  model = Model(opt).to(opt.device)
   paramOptions = getParamOptions(opt, model)
   eps = 1e-4 if opt.fp16 else 1e-8
   opt.optimizer = opt.newOptimizer(opt, paramOptions, eps)
@@ -106,20 +108,19 @@ def initTrain(opt, model, epoch=None):
   else:
     torch.manual_seed(args.rank)
     np.random.seed(args.rank)
-
-def train(opt, model, init=True):
-  if init:
+  if epoch:
     initParameters(opt, model)
-    if type(init) == int:
+    if type(epoch) == int:
       model.load_state_dict(torch.load('model.epoch{}.pth'.format(init), map_location='cpu'))
   model = model.to(opt.device) # need before constructing optimizers
-  if init:
-    initTrain(opt, model, init)
   if opt.cuda and opt.fp16:
     model, opt.optimizer = amp.initialize(model, opt.optimizer, opt_level="O{}".format(opt.fp16))
   if opt.cuda:
     print('GPU memory allocated before training: {} bytes'.format(torch.cuda.max_memory_allocated()))
     torch.cuda.reset_max_memory_allocated()
+  return opt, model
+
+def train(opt, model):
   last_epoch = opt.scheduler.last_epoch
   start = time()
   for i in range(last_epoch, opt.epochs):
@@ -188,10 +189,9 @@ else:
 if __name__ == '__main__':
   torch.manual_seed(args.rank)
   np.random.seed(args.rank)
-  model = Model(opt).to(opt.device)
-  initParameters(opt, model)
+  opt, model = initTrain(opt, True)
   print('Number of parameters: {} | valid error: {:.3f}'.format(getNelement(model), evaluate(opt, model)[0]))
-  initTrain(opt, model)
-  train(opt, model, False)
+  if not '-init_only' in sys.argv:
+    train(opt, model)
   modelName = 'model.epoch{}.pth'.format(opt.scheduler.last_epoch) if hasattr(opt, 'scheduler') else 'model.pth'
   torch.save(model.state_dict(), modelName)
