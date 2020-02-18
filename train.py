@@ -61,7 +61,7 @@ def trainStep(opt, model, x, y, l, *args):
   optimizer = opt.optimizer
   optimizer.zero_grad()
   _, rewards, y, *out = step(opt, model, x, y, l, args, False)
-  loss = opt.loss(opt, model, y, *out, rewards=rewards).sum()
+  loss = opt.loss(opt, model, y, *out, rewards=rewards).sum(dtype=torch.float)
   if torch.allclose(loss, nan, equal_nan=True):
     raise Exception('Loss returns NaN')
   backward(loss, opt)
