@@ -1,6 +1,6 @@
 from common import *
 from model import vocab
-option = dict(edim=16, epochs=2.5, maxgrad=1., learningrate=1e-2, sdt_decay_step=1, batchsize=8, vocabsize=vocab, fp16=2, saveInterval=10)
+option = dict(edim=16, epochs=1.5, maxgrad=1., learningrate=1e-2, sdt_decay_step=1, batchsize=8, vocabsize=vocab, fp16=2, saveInterval=10, logInterval=.4)
 option['loss'] = lambda opt, model, y, out, *_, rewards=[]: F.cross_entropy(out.transpose(-1, -2), y, reduction='none')
 option['criterion'] = lambda y, out, mask, *_: (out[:,:,1:vocab].max(-1)[1] + 1).ne(y).float() * mask.float()
 option['startEnv'] = lambda x, y, l, *args: (x, y, l, *args)

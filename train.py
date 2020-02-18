@@ -83,14 +83,14 @@ def evaluate(opt, model, path='val'):
   totalErr = 0
   count = 0
   for x, y, l, *args in newLoader(path, batch_size=opt.batchsize):
-    count += int(l.sum())
+    count += len(l)
     err, _, pred, _, *others = evaluateStep(opt, model, x, y, l, *args)
     totalErr += err
   vs = tuple(map(detach0, others))
   if opt.drawVars:
     opt.drawVars(x[0], l[0], *vs)
     print(pred[0])
-  return totalErr / count, opt.toImages(*vs) if opt.toImages else {}
+  return totalErr / count, opt.toImages(*vs) if opt.toImages else {}, count
 
 def initTrain(opt, epoch=None):
   model = Model(opt).to(opt.device)
@@ -123,40 +123,49 @@ def initTrain(opt, epoch=None):
 
 def train(opt, model):
   last_epoch = opt.scheduler.last_epoch
+  lastLog = last_epoch
+  count = 0
+  totalLoss = 0
+  remainder = opt.epochs - floor(opt.epochs)
+  epochs = int(opt.epochs) + (1 if remainder > 0 else 0)
+  dataArgs = dict(path='train', batch_size=opt.batchsize, shuffle=True)
+  try:
+    from data import getIters
+  except ImportError:
+    getIters = lambda loader, **_: len(loader)
   start = time()
-  residual = opt.epochs - floor(opt.epochs)
-  epochs = int(opt.epochs) + (1 if residual > 0 else 0)
   for i in range(last_epoch, epochs):
-    count = 0
-    totalLoss = 0
     j = 0
     model.train()
-    loader = newLoader('train', batch_size=opt.batchsize, shuffle=True)
-    if i == last_epoch:
-      residual *= len(loader)
+    loader = newLoader(**dataArgs)
+    iters = getIters(loader, **dataArgs)
     for x, y, l, *args in loader:
-      length = len(l)
-      profile = opt.profile and i == last_epoch and count == opt.batchsize
+      count += len(l)
+      profile = opt.profile and i == last_epoch and j == 0
       with torch.autograd.profiler.profile(enabled=profile, use_cuda=opt.cuda) as prof:
         loss = trainStep(opt, model, x, y, l, *args)
       if profile:
         print(prof.key_averages().table())
         prof.export_chrome_trace('train-prof.trace')
       totalLoss += loss
-      count += length
-      j += 1
-      if opt.cuda and i == last_epoch and count == opt.batchsize:
+      if opt.cuda and i == last_epoch and j == 0:
         print('GPU memory usage of one minibatch: {} bytes'.format(torch.cuda.max_memory_allocated()))
-      if i == epochs - 1 and j >= residual > 0:
+      j += 1
+      currEpoch = i + j / iters
+      if currEpoch - lastLog >= opt.logInterval:
+        valErr, vs, _ = evaluate(opt, model)
+        avgLoss = totalLoss / count
+        if opt.writer:
+          opt.writer({'loss': avgLoss}, images=vs, histograms=dict(model.named_parameters()), n=currEpoch)
+        print('Epoch #{} | train loss: {:6.6f} | valid error: {:.4f} | learning rate: {:.5f} | train samples: {} | time elapsed: {:6.2f}s'
+            .format(currEpoch, avgLoss, valErr, opt.scheduler.get_last_lr()[0], count, time() - start))
+        lastLog = currEpoch
+        totalLoss = 0
+        count = 0
+      if currEpoch >= opt.epochs:
         break
     if opt.scheduler:
       opt.scheduler.step()
-    valErr, vs = evaluate(opt, model)
-    avgLoss = totalLoss / count
-    if opt.writer:
-      opt.writer({'loss': avgLoss}, images=vs, histograms=dict(model.named_parameters()), n=opt.scheduler.last_epoch)
-    print('Epoch #{} | train loss: {:6.6f} | valid error: {:.4f} | learning rate: {:.5f} | train samples: {} | time elapsed: {:6.2f}s'
-          .format(opt.scheduler.last_epoch, avgLoss, valErr, opt.scheduler.get_last_lr()[0], count, time() - start))
     if opt.saveInterval and i % opt.saveInterval == 9:
       saveState(opt, model, opt.scheduler.last_epoch)
   return valErr
@@ -187,6 +196,7 @@ opt.reset_parameters = 0
 opt.toImages = 0
 opt.profile = False
 opt.saveInterval = 10
+opt.logInterval = 1
 opt.__dict__.update(option)
 if opt.cuda and opt.fp16 > 1:
   try:
@@ -209,5 +219,7 @@ if __name__ == '__main__':
   print('Number of parameters: {} | valid error: {:.3f}'.format(getNelement(model), evaluate(opt, model)[0]))
   if not '-init_only' in sys.argv:
     train(opt, model)
-  modelName = 'model.epoch{}.pt'.format(opt.scheduler.last_epoch) if hasattr(opt, 'scheduler') else 'model.pth'
+    err, _, count = evaluate(opt, model, 'test')
+    print('Test error: {:.3f} | test samples: {}'.format(err, count))
+  modelName = 'model.epoch{}.pt'.format(opt.scheduler.last_epoch) if hasattr(opt, 'scheduler') else 'model.pt'
   torch.save(model.state_dict(), modelName)
