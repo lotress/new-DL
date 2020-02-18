@@ -1,5 +1,6 @@
 from common import *
 import sys
+from pickle import HIGHEST_PROTOCOL
 from time import time
 from math import floor
 import torch.optim as optim
@@ -12,8 +13,9 @@ l2Reg = lambda acc, cur: acc + (cur * cur).sum(dtype=torch.float)
 nan = torch.tensor(float('nan'), device=opt.device)
 toDevice = lambda a, device: tuple(map(lambda x: x.to(device, non_blocking=True) if isinstance(x, torch.Tensor) else x, a))
 detach0 = lambda x: x[0].detach() if isinstance(x, torch.Tensor) else x[0]
-modelPath = lambda epoch: 'model.epoch{}.pt'.format(epoch)
+modelPath = lambda epoch=None: 'model.epoch{}.pt'.format(epoch) if epoch else 'model.pt'
 statePath = lambda epoch: 'train.epoch{}.pt'.format(epoch)
+saveModel = lambda model, path: torch.save(model.state_dict(), path, pickle_protocol=HIGHEST_PROTOCOL)
 
 def initParameters(opt, model):
   for m in model.modules():
@@ -166,13 +168,13 @@ def train(opt, model):
         break
     if opt.scheduler:
       opt.scheduler.step()
-    if opt.saveInterval and i % opt.saveInterval == 9:
+    if opt.saveInterval and (i + 1) % opt.saveInterval == 0:
       saveState(opt, model, opt.scheduler.last_epoch)
   return valErr
 
 def saveState(opt, model, epoch):
-  torch.save(model.state_dict(), modelPath(epoch))
-  torch.save((opt.optimizer.state_dict(), opt.scheduler.state_dict()), statePath(epoch))
+  saveModel(model, modelPath(epoch))
+  torch.save((opt.optimizer.state_dict(), opt.scheduler.state_dict()), statePath(epoch), pickle_protocol=HIGHEST_PROTOCOL)
 
 try:
   from data import init
@@ -221,5 +223,4 @@ if __name__ == '__main__':
     train(opt, model)
     err, _, count = evaluate(opt, model, 'test')
     print('Test error: {:.3f} | test samples: {}'.format(err, count))
-  modelName = 'model.epoch{}.pt'.format(opt.scheduler.last_epoch) if hasattr(opt, 'scheduler') else 'model.pt'
-  torch.save(model.state_dict(), modelName)
+  saveModel(model, modelPath(opt.scheduler.last_epoch if hasattr(opt, 'scheduler') else None))
