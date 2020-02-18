@@ -156,7 +156,7 @@ def train(opt, model):
     if opt.writer:
       opt.writer({'loss': avgLoss}, images=vs, histograms=dict(model.named_parameters()), n=opt.scheduler.last_epoch)
     print('Epoch #{} | train loss: {:6.6f} | valid error: {:.4f} | learning rate: {:.5f} | train samples: {} | time elapsed: {:6.2f}s'
-          .format(opt.scheduler.last_epoch, avgLoss, valErr, opt.scheduler.get_lr()[0], count, time() - start))
+          .format(opt.scheduler.last_epoch, avgLoss, valErr, opt.scheduler.get_last_lr()[0], count, time() - start))
     if opt.saveInterval and i % opt.saveInterval == 9:
       saveState(opt, model, opt.scheduler.last_epoch)
   return valErr
