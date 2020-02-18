@@ -12,7 +12,6 @@ class Model(nn.Module):
         vocabsize = opt.vocabsize
         self.embedding = nn.Embedding(vocabsize, opt.edim)
         self.dropout = nn.Dropout(opt.dropout)
-        self.to(dtype=opt.dtype, device=opt.device)
         self.f0 = nn.Linear(opt.edim, opt.edim, bias=True)
         self.act0 = nn.LeakyReLU(.1)
         self.f1 = nn.Linear(opt.edim, vocabsize, bias=False)

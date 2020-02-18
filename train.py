@@ -1,18 +1,19 @@
 from common import *
 import sys
 from time import time
+from math import floor
 import torch.optim as optim
 from data import newLoader
 from model import Model, predict
 from option import option
-if amp:
-  from apex.optimizers import FusedAdam
 getNelement = lambda model: sum(map(lambda p: p.nelement(), model.parameters()))
 l1Reg = lambda acc, cur: acc + cur.abs().sum(dtype=torch.float)
 l2Reg = lambda acc, cur: acc + (cur * cur).sum(dtype=torch.float)
 nan = torch.tensor(float('nan'), device=opt.device)
 toDevice = lambda a, device: tuple(map(lambda x: x.to(device, non_blocking=True) if isinstance(x, torch.Tensor) else x, a))
 detach0 = lambda x: x[0].detach() if isinstance(x, torch.Tensor) else x[0]
+modelPath = lambda epoch: 'model.epoch{}.pt'.format(epoch)
+statePath = lambda epoch: 'train.epoch{}.pt'.format(epoch)
 
 def initParameters(opt, model):
   for m in model.modules():
@@ -74,7 +75,7 @@ def trainStep(opt, model, x, y, l, *args):
 
 def evaluateStep(opt, model, x, y, l, *args):
   pred, _, y, out, _, *others = step(opt, model, x, y, l, args)
-  missed = opt.criterion(y, out, *args)
+  missed = opt.criterion(y, out, *toDevice(args, opt.device))
   return (float(missed.sum()), missed, pred, *others)
 
 def evaluate(opt, model, path='val'):
@@ -102,7 +103,7 @@ def initTrain(opt, epoch=None):
   else:
     opt.scheduler = None
   if type(epoch) == int:
-    state = torch.load('train.epoch{}.pth'.format(epoch), map_location='cpu')
+    state = torch.load(statePath(epoch), map_location='cpu')
     opt.optimizer.load_state_dict(state[0])
     opt.scheduler.load_state_dict(state[1])
   else:
@@ -111,7 +112,7 @@ def initTrain(opt, epoch=None):
   if epoch:
     initParameters(opt, model)
     if type(epoch) == int:
-      model.load_state_dict(torch.load('model.epoch{}.pth'.format(init), map_location='cpu'))
+      model.load_state_dict(torch.load(modelPath(init), map_location='cpu'))
   model = model.to(opt.device) # need before constructing optimizers
   if opt.cuda and opt.fp16:
     model, opt.optimizer = amp.initialize(model, opt.optimizer, opt_level="O{}".format(opt.fp16))
@@ -123,12 +124,18 @@ def initTrain(opt, epoch=None):
 def train(opt, model):
   last_epoch = opt.scheduler.last_epoch
   start = time()
-  for i in range(last_epoch, opt.epochs):
+  residual = opt.epochs - floor(opt.epochs)
+  epochs = int(opt.epochs) + (1 if residual > 0 else 0)
+  for i in range(last_epoch, epochs):
     count = 0
     totalLoss = 0
+    j = 0
     model.train()
-    for x, y, l, *args in newLoader('train', batch_size=opt.batchsize, shuffle=True):
-      length = int(l.sum())
+    loader = newLoader('train', batch_size=opt.batchsize, shuffle=True)
+    if i == last_epoch:
+      residual *= len(loader)
+    for x, y, l, *args in loader:
+      length = len(l)
       profile = opt.profile and i == last_epoch and count == opt.batchsize
       with torch.autograd.profiler.profile(enabled=profile, use_cuda=opt.cuda) as prof:
         loss = trainStep(opt, model, x, y, l, *args)
@@ -137,23 +144,26 @@ def train(opt, model):
         prof.export_chrome_trace('train-prof.trace')
       totalLoss += loss
       count += length
+      j += 1
       if opt.cuda and i == last_epoch and count == opt.batchsize:
         print('GPU memory usage of one minibatch: {} bytes'.format(torch.cuda.max_memory_allocated()))
+      if i == epochs - 1 and j >= residual > 0:
+        break
     if opt.scheduler:
       opt.scheduler.step()
     valErr, vs = evaluate(opt, model)
     avgLoss = totalLoss / count
     if opt.writer:
       opt.writer({'loss': avgLoss}, images=vs, histograms=dict(model.named_parameters()), n=opt.scheduler.last_epoch)
-    print('Epoch #{} | train loss: {:6.6f} | valid error: {:.4f} | learning rate: {:.5f} | time elapsed: {:6.2f}s'
-          .format(opt.scheduler.last_epoch, avgLoss, valErr, opt.scheduler.get_lr()[0], time() - start))
-    if i % 10 == 9:
+    print('Epoch #{} | train loss: {:6.6f} | valid error: {:.4f} | learning rate: {:.5f} | train samples: {} | time elapsed: {:6.2f}s'
+          .format(opt.scheduler.last_epoch, avgLoss, valErr, opt.scheduler.get_lr()[0], count, time() - start))
+    if opt.saveInterval and i % opt.saveInterval == 9:
       saveState(opt, model, opt.scheduler.last_epoch)
   return valErr
 
 def saveState(opt, model, epoch):
-  torch.save(model.state_dict(), 'model.epoch{}.pth'.format(epoch))
-  torch.save((opt.optimizer.state_dict(), opt.scheduler.state_dict()), 'train.epoch{}.pth'.format(epoch))
+  torch.save(model.state_dict(), modelPath(epoch))
+  torch.save((opt.optimizer.state_dict(), opt.scheduler.state_dict()), statePath(epoch))
 
 try:
   from data import init
@@ -167,7 +177,7 @@ opt.learningrate = 0.001 # initial learning rate
 opt.sdt_decay_step = 10 # how often to reduce learning rate
 opt.criterion = lambda y, out, mask, *args: F.mse_loss(out, y) # criterion for evaluation
 opt.loss = lambda opt, model, y, out, *args, **_: F.mse_loss(out, y) # criterion for loss function
-opt.newOptimizer = (lambda opt, params, _: FusedAdam(params, lr=opt.learningrate)) if amp else lambda opt, params, eps: optim.Adam(params, lr=opt.learningrate, amsgrad=True, eps=eps)
+opt.newOptimizer = lambda opt, params, eps: optim.Adam(params, lr=opt.learningrate, amsgrad=True, eps=eps)
 opt.startEnv = lambda *args: args
 opt.stepEnv = lambda *_: False, 1., None, None
 opt.cumOut = False
@@ -176,8 +186,14 @@ opt.drawVars = 0
 opt.reset_parameters = 0
 opt.toImages = 0
 opt.profile = False
+opt.saveInterval = 10
 opt.__dict__.update(option)
 if opt.cuda and opt.fp16 > 1:
+  try:
+    from apex.optimizers import FusedAdam
+    FusedAdam([nan])
+    opt.newOptimizer = lambda opt, params, _: FusedAdam(params, lr=opt.learningrate)
+  except RuntimeError: pass
   getParameters = lambda opt, _: amp.master_params(opt.optimizer)
   def backward(loss, opt):
     with amp.scale_loss(loss, opt.optimizer) as scaled_loss:
@@ -193,5 +209,5 @@ if __name__ == '__main__':
   print('Number of parameters: {} | valid error: {:.3f}'.format(getNelement(model), evaluate(opt, model)[0]))
   if not '-init_only' in sys.argv:
     train(opt, model)
-  modelName = 'model.epoch{}.pth'.format(opt.scheduler.last_epoch) if hasattr(opt, 'scheduler') else 'model.pth'
+  modelName = 'model.epoch{}.pt'.format(opt.scheduler.last_epoch) if hasattr(opt, 'scheduler') else 'model.pth'
   torch.save(model.state_dict(), modelName)
