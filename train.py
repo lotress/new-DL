@@ -152,19 +152,19 @@ def train(opt, model):
       if opt.cuda and i == last_epoch and j == 0:
         print('GPU memory usage of one minibatch: {} bytes'.format(torch.cuda.max_memory_allocated()))
       j += 1
-      currEpoch = i + j / iters
-      if currEpoch - lastLog >= opt.logInterval:
+      opt.currEpoch = i + j / iters
+      if opt.currEpoch - lastLog >= opt.logInterval:
         valErr, vs, _ = evaluate(opt, model)
         avgLoss = totalLoss / count
         if opt.writer:
-          opt.writer({'loss': avgLoss}, images=vs, histograms=dict(model.named_parameters()), n=currEpoch)
-        print('Epoch #{} | train loss: {:6.6f} | valid error: {:.4f} | learning rate: {:.5f} | train samples: {} | time elapsed: {:6.2f}s'
-            .format(currEpoch, avgLoss, valErr, opt.scheduler.get_last_lr()[0], count, time() - start))
-        lastLog = currEpoch
+          opt.writer({'loss': avgLoss}, images=vs, histograms=dict(model.named_parameters()), n=opt.currEpoch)
+        print('Epoch #{:.2f} | train loss: {:6.6f} | valid error: {:.4f} | learning rate: {:.5f} | train samples: {} | time elapsed: {:6.2f}s'
+            .format(opt.currEpoch, avgLoss, valErr, opt.scheduler.get_last_lr()[0], count, time() - start))
+        lastLog = opt.currEpoch
         totalLoss = 0
         count = 0
         model.train()
-      if currEpoch >= opt.epochs:
+      if opt.currEpoch >= opt.epochs:
         break
     if opt.scheduler:
       opt.scheduler.step()
@@ -200,6 +200,7 @@ opt.profile = False
 opt.saveInterval = 10
 opt.logInterval = 1
 opt.ampArgs = {}
+opt.currEpoch = 0.
 opt.__dict__.update(option)
 if opt.cuda and opt.fp16 > 1:
   try:
