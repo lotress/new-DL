@@ -95,7 +95,7 @@ def evaluate(opt, model, path='val'):
   return totalErr / count, opt.toImages(*vs) if opt.toImages else {}, count
 
 def initTrain(opt, epoch=None):
-  model = Model(opt).to(opt.device)
+  model = Model(opt).train()
   paramOptions = getParamOptions(opt, model)
   eps = 1e-4 if opt.fp16 else 1e-8
   opt.optimizer = opt.newOptimizer(opt, paramOptions, eps)
@@ -117,7 +117,7 @@ def initTrain(opt, epoch=None):
       model.load_state_dict(torch.load(modelPath(init), map_location='cpu'))
   model = model.to(opt.device) # need before constructing optimizers
   if opt.cuda and opt.fp16:
-    model, opt.optimizer = amp.initialize(model, opt.optimizer, opt_level="O{}".format(opt.fp16))
+    model, opt.optimizer = amp.initialize(model, opt.optimizer, opt_level="O{}".format(opt.fp16), **opt.ampArgs)
   if opt.cuda:
     print('GPU memory allocated before training: {} bytes'.format(torch.cuda.max_memory_allocated()))
     torch.cuda.reset_max_memory_allocated()
@@ -138,7 +138,6 @@ def train(opt, model):
   start = time()
   for i in range(last_epoch, epochs):
     j = 0
-    model.train()
     loader = newLoader(**dataArgs)
     iters = getIters(loader, **dataArgs)
     for x, y, l, *args in loader:
@@ -164,6 +163,7 @@ def train(opt, model):
         lastLog = currEpoch
         totalLoss = 0
         count = 0
+        model.train()
       if currEpoch >= opt.epochs:
         break
     if opt.scheduler:
@@ -199,6 +199,7 @@ opt.toImages = 0
 opt.profile = False
 opt.saveInterval = 10
 opt.logInterval = 1
+opt.ampArgs = {}
 opt.__dict__.update(option)
 if opt.cuda and opt.fp16 > 1:
   try:
