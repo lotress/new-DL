@@ -12,7 +12,7 @@ class Model(nn.Module):
         vocabsize = opt.vocabsize
         self.embedding = nn.Embedding(vocabsize, opt.edim)
         self.dropout = nn.Dropout(opt.dropout)
-        self.f0 = nn.Linear(opt.edim, opt.edim, bias=True)
+        self.fs = nn.ModuleList(nn.Linear(opt.edim, opt.edim, bias=True) for _ in range(8))
         self.act0 = nn.LeakyReLU(.1)
         self.f1 = nn.Linear(opt.edim, vocabsize, bias=False)
 
@@ -20,9 +20,8 @@ class Model(nn.Module):
         bsz, l = x.shape
         e = self.dropout(self.embedding(x))
         mask = mask.to(e.dtype).unsqueeze(-1)
-        x1 = self.act0(self.f0(e)) * mask
-        x2 = F.normalize(x1, dim=1, eps=self.eps) * mask
-        return self.f1(x2), Zero.to(self.device), x1
+        x1 = reduce(lambda x, f: F.normalize(self.act0(f(x)) * mask + x, dim=1, eps=self.eps) * mask, self.fs, e)
+        return self.f1(x1), Zero.to(self.device), x1
 
 with open('integrationTests.dict', encoding='utf-8') as fd:
     idict = [line.split('\t')[0] for line in fd if not line.startswith('__FP16_PAD_')]

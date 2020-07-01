@@ -5,7 +5,7 @@ dataLength = {'train': 4096, 'val': 256, 'test': 256}
 vocabsize = 8
 
 class Data(Dataset):
-    def __init__(self, path):
+    def __init__(self, path, opt, **kwargs):
         super(Data, self).__init__()
         l = dataLength[path]
         self.lens = torch.ones((l,), dtype=torch.long) * 4
@@ -19,4 +19,4 @@ class Data(Dataset):
         x = self.data[ind]
         return x, x, self.lens[ind], self.mask[ind]
 
-newLoader = lambda path, *args, **kwargs: DataLoader(Data(path), *args, **kwargs)
+newLoader = lambda path, opt, *args, **kwargs: DataLoader(Data(path, opt), *args, **kwargs)
